@@ -3,6 +3,7 @@ use std::fs;
 use std::process;
 
 use inquire::Text;
+use flutter::FlutterSdk;
 
 mod preflight;
 mod flutter;
@@ -38,6 +39,9 @@ fn main() {
 
         resolved
     });
+
+    let flutter = FlutterSdk::new(&flutter_path); 
+    flutter.get_devices();
 
     println!("flutter: {}", flutter_path.display());
 
