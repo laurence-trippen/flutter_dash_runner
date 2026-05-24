@@ -1,12 +1,14 @@
 use std::env;
 use std::fs;
 use std::process;
+use std::process::Command;
 
-use inquire::Text;
 use flutter::FlutterSdk;
+use inquire::Select;
+use inquire::Text;
 
-mod preflight;
 mod flutter;
+mod preflight;
 
 fn main() {
     // first try to access commandline argument or fallback to cwd
@@ -42,12 +44,22 @@ fn main() {
 
     preflight::check_pubspec_file(&resolved_target_path);
 
-    let flutter = FlutterSdk::new(&flutter_path); 
-    let devices = flutter.get_devices().expect("err: retrieving flutter devices");
+    let flutter = FlutterSdk::new(&flutter_path);
+    let devices = flutter
+        .get_devices()
+        .expect("err: retrieving flutter devices");
 
     if devices.is_empty() {
         println!("there are no flutter devices to operate on");
         process::exit(2);
     }
 
+    let selected_device = Select::new("Select device to run on", devices)
+        .prompt()
+        .expect("error: while selecting device");
+
+    Command::new(&flutter_path)
+        .args(["run", "-d", &selected_device])
+        .status()
+        .expect("error: failed to spawn flutter run");
 }
