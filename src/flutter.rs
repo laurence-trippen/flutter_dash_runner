@@ -1,7 +1,49 @@
 use std::{
+    fmt, io,
     path::{Path, PathBuf},
     process::Command,
+    string::FromUtf8Error,
 };
+
+#[derive(Debug)]
+pub enum FlutterError {
+    CommandFailed(io::Error),
+    NonZeroExit { code: Option<i32>, stderr: String },
+    InvalidUtf8(FromUtf8Error),
+    UnexpectedOutput(&'static str),
+}
+
+impl fmt::Display for FlutterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CommandFailed(e) => write!(f, "couldn't run flutter binary: {e}"),
+            Self::NonZeroExit { code, stderr } => {
+                write!(f, "flutter ended with code {code:?}: {stderr}")
+            }
+            Self::InvalidUtf8(e) => write!(f, "invalid utf-8 output in flutter: {e}"),
+            Self::UnexpectedOutput(msg) => write!(f, "un-expected output format: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for FlutterError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CommandFailed(e) => Some(e),
+            Self::InvalidUtf8(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+// with From-Impls the `?` works automagically:
+impl From<io::Error> for FlutterError {
+    fn from(e: io::Error) -> Self { Self::CommandFailed(e) }
+}
+
+impl From<FromUtf8Error> for FlutterError {
+    fn from(e: FromUtf8Error) -> Self { Self::InvalidUtf8(e) }
+}
 
 #[derive(Debug, Clone)]
 pub struct FlutterSdk {
@@ -15,59 +57,60 @@ impl FlutterSdk {
         }
     }
 
-    pub fn get_devices(&self) {
-        let output = Command::new(self.path.clone())
+    pub fn get_devices(&self) -> Result<Vec<String>, FlutterError> {
+        let output = Command::new(&self.path)
             .arg("devices")
-            .output()
-            .expect("err: flutter devices failed!");
+            .output()?;
 
-        if output.status.success() {
-            let output = String::from_utf8(output.stdout).unwrap();
-            let devices = self.extract_devices(&output);
-
-            println!("{}", devices.join(","));
+        if !output.status.success() {
+            return Err(FlutterError::NonZeroExit {
+                code: output.status.code(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
         }
+
+        let stdout = String::from_utf8(output.stdout)?;  // FromUtf8Error to FlutterError
+        self.extract_devices(&stdout)
     }
 
-    fn extract_devices(&self, output: &str) -> Vec<String> {
+    fn extract_devices(&self, output: &str) -> Result<Vec<String>, FlutterError> {
         const INDICATOR: &str = "•";
 
         let start_index = output
             .find("connected devices:")
-            .expect("err: no start indicator found");
+            .ok_or(FlutterError::UnexpectedOutput("kein Start-Indikator"))?;
 
         let last_index = output
             .rfind(INDICATOR)
-            .expect("err: no end indicator found");
+            .ok_or(FlutterError::UnexpectedOutput("kein End-Indikator"))?;
 
-        assert!(
-            start_index < last_index,
-            "err: invalid output of flutter devices"
-        );
-
-        let devices_output = &output[start_index..last_index];
-        let device_lines: Vec<String> = devices_output.split('\n').map(String::from).collect();
-
-        let mut devices: Vec<String> = vec![];
-
-        for line in device_lines {
-            let dot_indices: Vec<usize> = line.match_indices(INDICATOR).map(|(i, _)| i).collect();
-
-            let Some(&first_dot_index) = dot_indices.get(0) else {
-                continue;
-            };
-
-            let Some(&second_dot_index) = dot_indices.get(1) else {
-                continue;
-            };
-
-            let Some(device) = line.get(first_dot_index..second_dot_index) else {
-                continue;
-            };
-
-            devices.push(String::from(device.replace(INDICATOR, "").trim()));
+        if start_index >= last_index {
+            return Err(FlutterError::UnexpectedOutput(
+                "Start liegt hinter Ende",
+            ));
         }
 
-        return devices;
+        let devices_output = &output[start_index..last_index];
+        let mut devices: Vec<String> = Vec::new();
+
+        for line in devices_output.lines() {
+            let dot_indices: Vec<usize> =
+                line.match_indices(INDICATOR).map(|(i, _)| i).collect();
+
+            let [first, second, ..] = dot_indices.as_slice() else {
+                continue;
+            };
+
+            let first = *first;
+            let second = *second;
+
+            let Some(device) = line.get(first..second) else {
+                continue;
+            };
+
+            devices.push(device.replace(INDICATOR, "").trim().to_string());
+        }
+
+        Ok(devices)
     }
 }

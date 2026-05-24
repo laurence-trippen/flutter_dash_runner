@@ -40,10 +40,14 @@ fn main() {
         resolved
     });
 
-    let flutter = FlutterSdk::new(&flutter_path); 
-    flutter.get_devices();
-
-    println!("flutter: {}", flutter_path.display());
-
     preflight::check_pubspec_file(&resolved_target_path);
+
+    let flutter = FlutterSdk::new(&flutter_path); 
+    let devices = flutter.get_devices().expect("err: retrieving flutter devices");
+
+    if devices.is_empty() {
+        println!("there are no flutter devices to operate on");
+        process::exit(2);
+    }
+
 }
