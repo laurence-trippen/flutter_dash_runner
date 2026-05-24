@@ -23,7 +23,9 @@ impl FlutterSdk {
 
         if output.status.success() {
             let output = String::from_utf8(output.stdout).unwrap();
-            self.extract_devices(&output);
+            let devices = self.extract_devices(&output);
+
+            println!("{}", devices.join(","));
         }
     }
 
@@ -63,7 +65,7 @@ impl FlutterSdk {
                 continue;
             };
 
-            devices.push(String::from(device.trim()));
+            devices.push(String::from(device.replace(INDICATOR, "").trim()));
         }
 
         return devices;
